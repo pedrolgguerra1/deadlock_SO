@@ -191,11 +191,106 @@ fail:
     die("%s", msg);
 }
 
+static void add_command(cmd_type type, int customer, int *values, int line)
+{
+    cmds = realloc(cmds, (n_cmds + 1) * sizeof(command));
+    if (!cmds)
+        die("memoria insuficiente");
+    cmds[n_cmds].type = type;
+    cmds[n_cmds].customer = customer;
+    cmds[n_cmds].values = values;
+    cmds[n_cmds].line = line;
+    n_cmds++;
+}
+
+static void parse_commands(void)
+{
+    FILE *f = fopen(COMMANDS_FILE, "r");
+    char *line = NULL, *p, *tok, *save;
+    char msg[160] = "";
+    size_t cap = 0;
+    int lineno = 0, cust, count, *vals = NULL;
+    cmd_type type;
+
+    if (!f)
+        die("nao foi possivel abrir '%s': %s", COMMANDS_FILE, strerror(errno));
+
+    while (getline(&line, &cap, f) != -1) {
+        lineno++;
+        p = trim(line);
+        if (*p == '\0')
+            continue;
+        tok = strtok_r(p, " \t", &save);
+        if (strcmp(tok, "*") == 0) {
+            if (strtok_r(NULL, " \t", &save)) {
+                snprintf(msg, sizeof msg, "%s linha %d: o comando * nao recebe parametros",
+                         COMMANDS_FILE, lineno);
+                goto fail;
+            }
+            add_command(CMD_STAR, -1, NULL, lineno);
+            continue;
+        }
+        if (strcmp(tok, "RQ") == 0)
+            type = CMD_RQ;
+        else if (strcmp(tok, "RL") == 0)
+            type = CMD_RL;
+        else {
+            snprintf(msg, sizeof msg, "%s linha %d: comando '%s' desconhecido (use RQ, RL ou *)",
+                     COMMANDS_FILE, lineno, tok);
+            goto fail;
+        }
+        tok = strtok_r(NULL, " \t", &save);
+        if (!tok || !parse_nonneg(tok, &cust) || cust >= n_customers) {
+            snprintf(msg, sizeof msg, "%s linha %d: indice de cliente invalido (esperado 0 a %d)",
+                     COMMANDS_FILE, lineno, n_customers - 1);
+            goto fail;
+        }
+        vals = xmalloc(n_resources * sizeof(int));
+        count = 0;
+        while ((tok = strtok_r(NULL, " \t", &save)) != NULL) {
+            if (count >= n_resources) {
+                snprintf(msg, sizeof msg,
+                         "%s linha %d: valores demais (esperado %d, conforme os recursos da execucao)",
+                         COMMANDS_FILE, lineno, n_resources);
+                goto fail;
+            }
+            if (!parse_nonneg(tok, &vals[count])) {
+                snprintf(msg, sizeof msg, "%s linha %d: valor '%s' invalido (esperado inteiro >= 0)",
+                         COMMANDS_FILE, lineno, tok);
+                goto fail;
+            }
+            count++;
+        }
+        if (count != n_resources) {
+            snprintf(msg, sizeof msg,
+                     "%s linha %d: %d valores, mas foram informados %d recursos na execucao",
+                     COMMANDS_FILE, lineno, count, n_resources);
+            goto fail;
+        }
+        add_command(type, cust, vals, lineno);
+        vals = NULL;
+    }
+    if (ferror(f)) {
+        snprintf(msg, sizeof msg, "falha de leitura em %s", COMMANDS_FILE);
+        goto fail;
+    }
+    free(line);
+    fclose(f);
+    return;
+
+fail:
+    free(vals);
+    free(line);
+    fclose(f);
+    die("%s", msg);
+}
+
 int main(int argc, char **argv)
 {
     parse_args(argc, argv);
     load_customers();
-    printf("%d clientes, %d recursos\n", n_customers, n_resources);
+    parse_commands();
+    printf("%d clientes, %d recursos, %d comandos\n", n_customers, n_resources, n_cmds);
     free_all();
     return 0;
 }
