@@ -285,12 +285,122 @@ fail:
     die("%s", msg);
 }
 
+static int exceeds(const int *a, const int *b)
+{
+    for (int j = 0; j < n_resources; j++)
+        if (a[j] > b[j])
+            return 1;
+    return 0;
+}
+
+static int is_safe(void)
+{
+    int *work = xmalloc(n_resources * sizeof(int));
+    int *finish = calloc(n_customers, sizeof(int));
+    int done = 0, progress = 1;
+
+    if (!finish) {
+        free(work);
+        die("memoria insuficiente");
+    }
+    memcpy(work, available, n_resources * sizeof(int));
+    while (done < n_customers && progress) {
+        progress = 0;
+        for (int i = 0; i < n_customers; i++) {
+            if (!finish[i] && !exceeds(need[i], work)) {
+                for (int j = 0; j < n_resources; j++)
+                    work[j] += allocation[i][j];
+                finish[i] = 1;
+                done++;
+                progress = 1;
+            }
+        }
+    }
+    free(work);
+    free(finish);
+    return done == n_customers;
+}
+
+static void print_vec(FILE *f, const int *v)
+{
+    for (int j = 0; j < n_resources; j++)
+        fprintf(f, j ? " %d" : "%d", v[j]);
+}
+
+static void request_resources(int i, const int *req)
+{
+    if (exceeds(req, need[i])) {
+        fprintf(out, "The customer %d request ", i);
+        print_vec(out, req);
+        fputs(" was denied because exceed its maximum allocation\n", out);
+        return;
+    }
+    if (exceeds(req, available)) {
+        fputs("The resources ", out);
+        print_vec(out, available);
+        fprintf(out, " are not enough to customer %d request ", i);
+        print_vec(out, req);
+        fputs(" \n", out);
+        return;
+    }
+
+    for (int j = 0; j < n_resources; j++) {
+        available[j]     -= req[j];
+        allocation[i][j] += req[j];
+        need[i][j]       -= req[j];
+    }
+    if (!is_safe()) {
+        for (int j = 0; j < n_resources; j++) {
+            available[j]     += req[j];
+            allocation[i][j] -= req[j];
+            need[i][j]       += req[j];
+        }
+        fprintf(out, "The customer %d request ", i);
+        print_vec(out, req);
+        fputs(" was denied because result in an unsafe state\n", out);
+        return;
+    }
+    fprintf(out, "Allocate to customer %d the resources ", i);
+    print_vec(out, req);
+    fputc('\n', out);
+}
+
+static void release_resources(int i, const int *rel)
+{
+    if (exceeds(rel, allocation[i])) {
+        fprintf(out, "The customer %d release ", i);
+        print_vec(out, rel);
+        fputs(" was denied because exceed its allocation\n", out);
+        return;
+    }
+    for (int j = 0; j < n_resources; j++) {
+        available[j]     += rel[j];
+        allocation[i][j] -= rel[j];
+        need[i][j]       += rel[j];
+    }
+    fprintf(out, "Release from customer %d the resources ", i);
+    print_vec(out, rel);
+    fputc('\n', out);
+}
+
+static void process_commands(void)
+{
+    for (int k = 0; k < n_cmds; k++) {
+        switch (cmds[k].type) {
+        case CMD_RQ: request_resources(cmds[k].customer, cmds[k].values); break;
+        case CMD_RL: release_resources(cmds[k].customer, cmds[k].values); break;
+        case CMD_STAR: break;
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     parse_args(argc, argv);
     load_customers();
     parse_commands();
-    printf("%d clientes, %d recursos, %d comandos\n", n_customers, n_resources, n_cmds);
+    out = stdout;
+    process_commands();
     free_all();
     return 0;
 }
