@@ -28,6 +28,7 @@ static int **need = NULL;
 static command *cmds = NULL;
 static int n_cmds = 0;
 static FILE *out = NULL;
+static int result_created = 0;
 
 static void free_all(void)
 {
@@ -383,13 +384,38 @@ static void release_resources(int i, const int *rel)
     fputc('\n', out);
 }
 
+static void print_col(FILE *f, const int *v, int width)
+{
+    int len = 0;
+    for (int j = 0; j < n_resources; j++)
+        len += fprintf(f, "%d ", v[j]);
+    for (; len < width; len++)
+        fputc(' ', f);
+}
+
+static void print_state(void)
+{
+    fputs("MAXIMUM   |   ALLOCATION  |   NEED\n", out);
+    for (int i = 0; i < n_customers; i++) {
+        print_col(out, maximum[i], 10);
+        fputs("|   ", out);
+        print_col(out, allocation[i], 12);
+        fputs("|   ", out);
+        print_col(out, need[i], 0);
+        fputc('\n', out);
+    }
+    fputs("AVAILABLE ", out);
+    print_col(out, available, 0);
+    fputc('\n', out);
+}
+
 static void process_commands(void)
 {
     for (int k = 0; k < n_cmds; k++) {
         switch (cmds[k].type) {
         case CMD_RQ: request_resources(cmds[k].customer, cmds[k].values); break;
         case CMD_RL: release_resources(cmds[k].customer, cmds[k].values); break;
-        case CMD_STAR: break;
+        case CMD_STAR: print_state(); break;
         }
     }
 }
@@ -399,7 +425,10 @@ int main(int argc, char **argv)
     parse_args(argc, argv);
     load_customers();
     parse_commands();
-    out = stdout;
+    out = fopen(RESULT_FILE, "w");
+    if (!out)
+        die("nao foi possivel criar '%s': %s", RESULT_FILE, strerror(errno));
+    result_created = 1;
     process_commands();
     free_all();
     return 0;
